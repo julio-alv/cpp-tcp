@@ -34,7 +34,7 @@ namespace tcp {
         int fd, kq;
         sockaddr_in addr;
         socklen_t len;
-        struct kevent list[10];
+        struct kevent list[32];
 
         explicit Conn(int fd, int kq) : fd(fd), kq(kq) {}
 
@@ -47,14 +47,14 @@ namespace tcp {
         }
 
         auto Read() -> std::expected<std::string, int> {
-            int nev = kevent(kq, nullptr, 0, list, 10, nullptr);
+            int nev = kevent(kq, nullptr, 0, list, 32, nullptr);
             if (nev == -1)
                 return std::unexpected(errno);
 
             for (int i = 0; i < nev; i++) {
                 if (list[i].filter == EVFILT_READ) {
-                    char buffer[1024];
-                    ssize_t bytesRead = read(fd, buffer, sizeof(buffer) - 1);
+                    char buffer[128];
+                    ssize_t bytesRead = recv(fd, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
                     if (bytesRead <= 0)
                         return std::unexpected(errno);
 
@@ -62,10 +62,14 @@ namespace tcp {
                     return std::string(buffer);
                 }
             }
+            return std::unexpected(-1);
         };
 
-        void Write(const std::string& message) {
-            write(fd, message.c_str(), message.size());
+        auto Write(const std::string& message) -> std::expected<bool, int> {
+            if (send(fd, message.c_str(), message.size(), MSG_DONTWAIT) == -1)
+                return std::unexpected(errno);
+
+            return true;
         }
     };
 

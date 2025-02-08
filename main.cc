@@ -9,7 +9,9 @@ void handle_client(tcp::Conn conn) {
             close(conn.fd);
             return;
         }
-        std::println("Received: {}", result.value());
+        std::print("Received: {}", result.value());
+
+        conn.Write("Hello!\n");
     }
 }
 
