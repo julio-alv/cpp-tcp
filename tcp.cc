@@ -3,9 +3,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <fcntl.h>
-#include <expected>
 #include <string>
 #include <print>
+#include <iostream>
+
+constexpr int MAX_KEVENTS = 32;
+constexpr int MAX_BACKLOG = 32;
 
 // Helper function to set a file descriptor to non-blocking mode
 static void set_nonblocking(int fd) {
@@ -17,81 +20,71 @@ static void set_nonblocking(int fd) {
 static struct kevent k;
 
 // Helper function to initialize a kqueue on the input file descriptor
-static auto init_kqueue(int fd) -> std::expected<int, int> {
+static int init_kqueue(int fd) {
     int q = kqueue();
     if (q == -1)
-        return std::unexpected(errno);
+        throw errno;
 
     EV_SET(&k, fd, EVFILT_READ, EV_ADD, 0, 0, nullptr);
     if (kevent(q, &k, 1, nullptr, 0, nullptr) == -1)
-        return std::unexpected(errno);
+        throw errno;
 
     return q;
 }
 
 namespace tcp {
-    struct Conn {
+    struct conn {
         int fd, kq;
         sockaddr_in addr;
         socklen_t len;
-        struct kevent list[32];
+        struct kevent list[MAX_KEVENTS];
 
-        explicit Conn(int fd, int kq) : fd(fd), kq(kq) {}
+        explicit conn(int fd, int kq) : fd(fd), kq(kq) {}
 
-        static auto New(int fd) -> std::expected<Conn, int> {
-            auto q = init_kqueue(fd);
-            if (!q)
-                return std::unexpected(q.error());
-
-            return Conn{ fd, q.value() };
+        static conn New(int fd) {
+            return conn{ fd, init_kqueue(fd) };
         }
 
-        auto Read() -> std::expected<std::string, int> {
-            int nev = kevent(kq, nullptr, 0, list, 32, nullptr);
+        std::string Read() {
+            int nev = kevent(kq, nullptr, 0, list, MAX_KEVENTS, nullptr);
             if (nev == -1)
-                return std::unexpected(errno);
+                throw errno;
 
             for (int i = 0; i < nev; i++) {
                 if (list[i].filter == EVFILT_READ) {
                     char buffer[128];
                     ssize_t bytesRead = recv(fd, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
                     if (bytesRead <= 0)
-                        return std::unexpected(errno);
+                        throw errno;
 
                     buffer[bytesRead] = '\0'; // Terminate string
                     return std::string(buffer);
                 }
             }
-            return std::unexpected(-1);
+            throw - 1;
         };
 
-        auto Write(const std::string& message) -> std::expected<bool, int> {
+        void Write(const std::string& message) {
             if (send(fd, message.c_str(), message.size(), MSG_DONTWAIT) == -1)
-                return std::unexpected(errno);
-
-            return true;
+                throw errno;
         }
     };
 
-    struct Listener {
+    struct listener {
         int fd, kq;
-        struct kevent list[32];
+        struct kevent list[MAX_KEVENTS];
 
-        explicit Listener(int fd, int kq) : fd(fd), kq(kq) {}
+        explicit listener(int fd, int kq) : fd(fd), kq(kq) {}
 
-        static auto New(int fd) -> std::expected<Listener, int> {
-            auto q = init_kqueue(fd);
-            if (!q)
-                return std::unexpected(q.error());
-
-            return Listener{ fd, q.value() };
+        static listener New(int fd) {
+            return listener{ fd, init_kqueue(fd) };
         }
 
         // Accept incomming connections (blocks)
-        auto Accept() -> std::expected<Conn, int> {
-            int nev = kevent(kq, nullptr, 0, list, 32, nullptr);
+        conn Accept() {
+            int nev = kevent(kq, nullptr, 0, list, MAX_KEVENTS, nullptr);
             if (nev == -1)
-                return std::unexpected(errno);
+                throw errno;
 
             for (int i = 0; i < nev; i++) {
                 if (list[i].filter == EVFILT_READ) {
@@ -99,25 +92,21 @@ namespace tcp {
                     socklen_t len;
                     int connfd = accept(fd, (sockaddr*)&addr, &len);
                     if (connfd == -1)
-                        continue;
+                        continue; // <- might consider throwing here
                     set_nonblocking(connfd);
 
-                    auto conn{ Conn::New(connfd) };
-                    if (!conn)
-                        continue;
-
-                    return conn;
+                    return conn::New(connfd);
                 }
             }
-            return std::unexpected(-1);
+            throw - 1;
         }
     };
 
-    // Create a socket and bind to the port, returns an error if any of the syscalls fail
-    auto Listen(int port) -> std::expected<Listener, int> {
+    // Create a socket and bind to the port, throws an error if any of the syscalls fail
+    listener Listen(int port) {
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd == -1)
-            return std::unexpected(errno);
+            throw errno;
         set_nonblocking(fd);
 
         sockaddr_in addr;
@@ -125,12 +114,12 @@ namespace tcp {
         addr.sin_addr.s_addr = INADDR_ANY;
         addr.sin_port = htons(port);
 
-        if (bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0)
-            return std::unexpected(errno);
+        if (bind(fd, (sockaddr*)&addr, sizeof(addr)) == -1)
+            throw errno;
 
-        if (listen(fd, 32) == -1)
-            return std::unexpected(errno);
+        if (listen(fd, MAX_BACKLOG) == -1)
+            throw errno;
 
-        return Listener::New(fd);
+        return listener::New(fd);
     }
 }

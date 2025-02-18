@@ -1,42 +1,24 @@
 #include <future>
 #include "tcp.cc"
+#include <iostream>
 
-void handle_client(tcp::Conn conn) {
+void handle_client(tcp::conn conn) {
+    conn.Write("Welcome to the TCP Server!\n");
     while (true) {
         auto result = conn.Read();
-        if (!result) {
-            perror("Client disconnected or error");
-            close(conn.fd);
-            return;
-        }
-        std::print("Received: {}", result.value());
-
+        std::cout << "Received: " << result;
         conn.Write("Hello!\n");
     }
 }
 
 int main() {
-    auto create_listener = tcp::Listen(8080);
-    if (!create_listener) {
-        perror("Failed to listen");
-        return 1;
-    }
-
-    auto listener = create_listener.value();
-    std::println("Listening on port 8080...");
+    auto listener = tcp::Listen(8080);
+    std::cout << "Listening on port 8080..." << std::endl;
 
     std::vector<std::future<void>> threads;
 
     while (true) {
-        auto create_conn = listener.Accept();
-        if (!create_conn) {
-            perror("Failed to accept");
-            continue;
-        }
-
-        std::println("Client Connected");
-        auto conn = create_conn.value();
-
+        auto conn = listener.Accept();
         threads.push_back(std::async(std::launch::async, handle_client, std::move(conn)));
     }
 
