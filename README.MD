@@ -1,6 +1,6 @@
 # cpp-tcp
 
-This is an example TCP library for studying `kqueue`, async c++ and the new features introduced in c++23
+This is an example TCP library for studying `kqueue`, async c++
 
 ## Requirements
 - clang
