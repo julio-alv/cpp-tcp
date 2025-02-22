@@ -1,13 +1,12 @@
 #include <future>
-#include "tcp.cc"
 #include <iostream>
+#include "tcp.cc"
 
 void handle_client(tcp::conn conn) {
-    conn.Write("Welcome to the TCP Server!\n");
+    // Echo whatever the client sends
     while (true) {
         auto result = conn.Read();
-        std::cout << "Received: " << result;
-        conn.Write("Hello!\n");
+        conn.Write(result);
     }
 }
 
@@ -21,6 +20,4 @@ int main() {
         auto conn = listener.Accept();
         threads.push_back(std::async(std::launch::async, handle_client, std::move(conn)));
     }
-
-    return 0;
 }
